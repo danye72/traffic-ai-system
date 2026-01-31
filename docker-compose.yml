@@ -1,0 +1,22 @@
+services:
+  backend:
+    build: ./backend
+    container_name: traffic_backend
+    ports:
+      - "8000:8000"
+    devices:
+      - "/dev/video0:/dev/video0"  # Permette a Docker di usare la webcam
+    volumes:
+      - ./backend:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  frontend:
+    build: ./frontend
+    container_name: traffic_frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - .:/app  # Nota il punto: montiamo la radice del progetto
+      - /app/node_modules # Proteggiamo i moduli installati
+    working_dir: /app/frontend # Diciamo a Docker di lavorare nella sottocartella

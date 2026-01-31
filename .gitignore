@@ -1,0 +1,17 @@
+# Video e file pesanti
+*.mp4
+*.avi
+*.pt
+
+# Python e Sistema
+__pycache__/
+.venv/
+.DS_Store
+
+# Frontend
+node_modules/
+dist/
+build/
+
+# Database locale e config temporanee
+config/rois.json
