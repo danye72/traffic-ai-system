@@ -3,8 +3,8 @@ import axios from 'axios';
 
 const App = () => {
   const [points, setPoints] = useState([]);
-  const [rois, setRois] = useState([]);
-  const [data, setData] = useState({ stats: {}, order: [] });
+  const [roiName, setRoiName] = useState("");
+  const [data, setData] = useState({ stats: {}, rois: [] });
   const W = 800;
   const H = 450;
 
@@ -16,7 +16,7 @@ const App = () => {
       } catch (e) { console.error(e); }
     };
     fetchData();
-    const interval = setInterval(fetchData, 1500); // Meno frequente per fluidità
+    const interval = setInterval(fetchData, 1000);
     return () => clearInterval(interval);
   }, []);
 
@@ -29,59 +29,89 @@ const App = () => {
   };
 
   const saveCurrentRoi = async () => {
-    if (points.length < 3) return alert("Disegna zona!");
-    const newRois = [...rois, { id: Date.now(), points }];
-    setRois(newRois);
+    if (points.length < 3) return alert("Disegna un'area con almeno 3 punti!");
+    if (!roiName) return alert("Assegna un nome alla zona prima di salvare.");
+    
+    const newRoi = { 
+      id: Date.now(), 
+      label: roiName,
+      points: points 
+    };
+    
+    const updatedRois = [...data.rois, newRoi];
     setPoints([]);
-    await axios.post('http://localhost:8000/api/roi', { rois: newRois });
+    setRoiName("");
+    await axios.post('http://localhost:8000/api/roi', { rois: updatedRois });
   };
 
   const resetAll = async () => {
-    setRois([]); setPoints([]); setData({ stats: {}, order: [] });
+    if (!window.confirm("Vuoi cancellare tutte le zone e resettare i conteggi?")) return;
     await axios.post('http://localhost:8000/api/roi', { rois: [] });
+    await axios.post('http://localhost:8000/api/stats/reset');
   };
 
   return (
-    <div style={{ padding: '20px', backgroundColor: '#0f0f0f', color: 'white', fontFamily: 'sans-serif', minHeight: '100vh' }}>
-      <h1 style={{ color: '#00e5ff' }}>Traffic Monitor AI - Turbo Mode</h1>
+    <div style={{ padding: '20px', backgroundColor: '#0f0f0f', color: 'white', fontFamily: 'Segoe UI, sans-serif', minHeight: '100vh' }}>
+      <h2 style={{ color: '#00e5ff', borderBottom: '1px solid #333', paddingBottom: '10px' }}>Dashboard Analisi Traffico AI</h2>
       
-      <div style={{ display: 'flex', gap: '30px' }}>
-        <div style={{ position: 'relative', width: 'fit-content', border: '1px solid #444' }}>
-          <img src="http://localhost:8000/api/video_feed" onClick={handleCanvasClick} style={{ width: W, height: H, display: 'block', cursor: 'crosshair' }} />
-          <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }} viewBox={`0 0 ${W} ${H}`}>
-            {points.map((p, i) => (<circle key={i} cx={p.x * W} cy={p.y * H} r="4" fill="#ffea00" />))}
-            {points.length > 1 && (<polyline points={points.map(p => `${p.x * W},${p.y * H}`).join(' ')} fill="none" stroke="#ffea00" strokeWidth="2" strokeDasharray="5" />)}
-          </svg>
+      <div style={{ display: 'flex', gap: '30px', marginTop: '20px' }}>
+        {/* Monitor Video */}
+        <div>
+          <div style={{ position: 'relative', border: '2px solid #444', borderRadius: '8px', overflow: 'hidden' }}>
+            <img src="http://localhost:8000/api/video_feed" onClick={handleCanvasClick} style={{ width: W, height: H, cursor: 'crosshair', display: 'block' }} />
+            <svg style={{ position: 'absolute', top: 0, left: 0, width: W, height: H, pointerEvents: 'none' }}>
+              {points.map((p, i) => <circle key={i} cx={p.x * W} cy={p.y * H} r="4" fill="#ffea00" />)}
+              {points.length > 1 && <polyline points={points.map(p => `${p.x * W},${p.y * H}`).join(' ')} fill="none" stroke="#ffea00" strokeWidth="2" strokeDasharray="4" />}
+            </svg>
+          </div>
+          
+          <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
+            <input 
+              type="text" 
+              placeholder="Nome nuova zona..." 
+              value={roiName}
+              onChange={(e) => setRoiName(e.target.value)}
+              style={{ flex: 1, padding: '12px', borderRadius: '4px', border: '1px solid #444', backgroundColor: '#1a1a1a', color: 'white' }}
+            />
+            <button onClick={saveCurrentRoi} style={{ padding: '10px 25px', background: '#00c853', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
+              SALVA AREA
+            </button>
+          </div>
         </div>
 
-        <div style={{ flexGrow: 1 }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: '#181818' }}>
+        {/* Tabella Dati */}
+        <div style={{ flex: 1 }}>
+          <table style={{ width: '100%', backgroundColor: '#181818', borderCollapse: 'collapse', borderRadius: '8px', overflow: 'hidden' }}>
             <thead>
-              <tr style={{ background: '#222', color: '#00e5ff' }}>
-                <th style={{ padding: '10px' }}>ZONA</th>
-                <th style={{ padding: '10px' }}>MOTO 🏍️</th>
-                <th style={{ padding: '10px' }}>AUTO 🚗</th>
-                <th style={{ padding: '10px' }}>PESANTI 🚛</th>
+              <tr style={{ background: '#333', color: '#00e5ff', textAlign: 'left' }}>
+                <th style={{ padding: '15px' }}>ZONA</th>
+                <th style={{ textAlign: 'center' }}>AUTO</th>
+                <th style={{ textAlign: 'center' }}>MOTO</th>
+                <th style={{ textAlign: 'center' }}>PESANTI</th>
+                <th style={{ textAlign: 'center', background: '#00e5ff', color: '#000' }}>TOTALE</th>
               </tr>
             </thead>
             <tbody>
-              {data.order.map((id, index) => {
-                const val = data.stats[id] || {motorcycle:0, car:0, bus:0, truck:0, occupied:false};
+              {data.rois.map((roi) => {
+                const s = data.stats[roi.id] || {car:0, motorcycle:0, bus:0, truck:0, occupied: false};
+                const heavy = (s.bus || 0) + (s.truck || 0);
+                const total = s.car + s.motorcycle + heavy;
                 return (
-                  <tr key={id} style={{ borderBottom: '1px solid #333', background: val.occupied ? 'rgba(0, 229, 255, 0.1)' : 'transparent' }}>
-                    <td style={{ padding: '10px', textAlign: 'center' }}>Z-{index + 1}</td>
-                    <td style={{ padding: '10px', textAlign: 'center', color: '#ffea00', fontWeight: 'bold' }}>{val.motorcycle}</td>
-                    <td style={{ padding: '10px', textAlign: 'center' }}>{val.car}</td>
-                    <td style={{ padding: '10px', textAlign: 'center' }}>{val.bus + val.truck}</td>
+                  <tr key={roi.id} style={{ borderBottom: '1px solid #2a2a2a', background: s.occupied ? 'rgba(0, 229, 255, 0.1)' : 'transparent' }}>
+                    <td style={{ padding: '15px', fontWeight: '500' }}>{roi.label}</td>
+                    <td style={{ textAlign: 'center' }}>{s.car}</td>
+                    <td style={{ textAlign: 'center', color: '#ffea00' }}>{s.motorcycle}</td>
+                    <td style={{ textAlign: 'center' }}>{heavy}</td>
+                    <td style={{ textAlign: 'center', fontWeight: 'bold', fontSize: '1.1em', color: '#00e5ff' }}>{total}</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-          <div style={{ marginTop: '20px', display: 'grid', gap: '10px' }}>
-            <button onClick={saveCurrentRoi} style={{ padding: '12px', background: '#00838f', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>SALVA AREA</button>
-            <button onClick={resetAll} style={{ padding: '12px', background: '#ad1457', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>CANCELLA TUTTO</button>
-          </div>
+          
+          <button onClick={resetAll} style={{ width: '100%', marginTop: '25px', padding: '12px', background: '#d32f2f', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
+            RESETTA TUTTE LE ZONE
+          </button>
         </div>
       </div>
     </div>
