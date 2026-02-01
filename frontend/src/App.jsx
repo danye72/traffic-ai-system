@@ -29,89 +29,70 @@ const App = () => {
   };
 
   const saveCurrentRoi = async () => {
-    if (points.length < 3) return alert("Disegna un'area con almeno 3 punti!");
-    if (!roiName) return alert("Assegna un nome alla zona prima di salvare.");
-    
-    const newRoi = { 
-      id: Date.now(), 
-      label: roiName,
-      points: points 
-    };
-    
+    if (points.length < 3) return alert("Disegna un'area!");
+    if (!roiName) return alert("Inserisci un nome!");
+    const newRoi = { id: Date.now(), label: roiName, points: points };
     const updatedRois = [...data.rois, newRoi];
-    setPoints([]);
-    setRoiName("");
+    setPoints([]); setRoiName("");
     await axios.post('http://localhost:8000/api/roi', { rois: updatedRois });
   };
 
-  const resetAll = async () => {
-    if (!window.confirm("Vuoi cancellare tutte le zone e resettare i conteggi?")) return;
+  const resetStatsOnly = async () => {
+    if (!window.confirm("Vuoi azzerare i conteggi? Le zone rimarranno salvate.")) return;
+    await axios.post('http://localhost:8000/api/stats/reset');
+  };
+
+  const deleteZones = async () => {
+    if (!window.confirm("Vuoi eliminare tutte le zone?")) return;
     await axios.post('http://localhost:8000/api/roi', { rois: [] });
     await axios.post('http://localhost:8000/api/stats/reset');
   };
 
   return (
-    <div style={{ padding: '20px', backgroundColor: '#0f0f0f', color: 'white', fontFamily: 'Segoe UI, sans-serif', minHeight: '100vh' }}>
-      <h2 style={{ color: '#00e5ff', borderBottom: '1px solid #333', paddingBottom: '10px' }}>Dashboard Analisi Traffico AI</h2>
-      
-      <div style={{ display: 'flex', gap: '30px', marginTop: '20px' }}>
-        {/* Monitor Video */}
+    <div style={{ padding: '20px', backgroundColor: '#0f0f0f', color: 'white', fontFamily: 'Arial', minHeight: '100vh' }}>
+      <h2 style={{ color: '#00e5ff' }}>Traffic Monitor con Persistenza</h2>
+      <div style={{ display: 'flex', gap: '20px' }}>
         <div>
-          <div style={{ position: 'relative', border: '2px solid #444', borderRadius: '8px', overflow: 'hidden' }}>
-            <img src="http://localhost:8000/api/video_feed" onClick={handleCanvasClick} style={{ width: W, height: H, cursor: 'crosshair', display: 'block' }} />
+          <div style={{ position: 'relative', border: '1px solid #444' }}>
+            <img src="http://localhost:8000/api/video_feed" onClick={handleCanvasClick} style={{ width: W, height: H, cursor: 'crosshair' }} />
             <svg style={{ position: 'absolute', top: 0, left: 0, width: W, height: H, pointerEvents: 'none' }}>
-              {points.map((p, i) => <circle key={i} cx={p.x * W} cy={p.y * H} r="4" fill="#ffea00" />)}
-              {points.length > 1 && <polyline points={points.map(p => `${p.x * W},${p.y * H}`).join(' ')} fill="none" stroke="#ffea00" strokeWidth="2" strokeDasharray="4" />}
+              {points.map((p, i) => <circle key={i} cx={p.x * W} cy={p.y * H} r="4" fill="yellow" />)}
+              {points.length > 1 && <polyline points={points.map(p => `${p.x * W},${p.y * H}`).join(' ')} fill="none" stroke="yellow" strokeWidth="2" />}
             </svg>
           </div>
-          
-          <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
-            <input 
-              type="text" 
-              placeholder="Nome nuova zona..." 
-              value={roiName}
-              onChange={(e) => setRoiName(e.target.value)}
-              style={{ flex: 1, padding: '12px', borderRadius: '4px', border: '1px solid #444', backgroundColor: '#1a1a1a', color: 'white' }}
-            />
-            <button onClick={saveCurrentRoi} style={{ padding: '10px 25px', background: '#00c853', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
-              SALVA AREA
-            </button>
+          <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+            <input type="text" placeholder="Nome zona..." value={roiName} onChange={(e) => setRoiName(e.target.value)}
+              style={{ flex: 1, padding: '10px', backgroundColor: '#1a1a1a', color: 'white', border: '1px solid #444' }} />
+            <button onClick={saveCurrentRoi} style={{ padding: '10px', background: '#00c853', color: 'white', border: 'none', cursor: 'pointer' }}>SALVA ZONA</button>
           </div>
         </div>
 
-        {/* Tabella Dati */}
         <div style={{ flex: 1 }}>
-          <table style={{ width: '100%', backgroundColor: '#181818', borderCollapse: 'collapse', borderRadius: '8px', overflow: 'hidden' }}>
+          <table style={{ width: '100%', backgroundColor: '#181818', borderCollapse: 'collapse' }}>
             <thead>
-              <tr style={{ background: '#333', color: '#00e5ff', textAlign: 'left' }}>
-                <th style={{ padding: '15px' }}>ZONA</th>
-                <th style={{ textAlign: 'center' }}>AUTO</th>
-                <th style={{ textAlign: 'center' }}>MOTO</th>
-                <th style={{ textAlign: 'center' }}>PESANTI</th>
-                <th style={{ textAlign: 'center', background: '#00e5ff', color: '#000' }}>TOTALE</th>
+              <tr style={{ color: '#00e5ff', textAlign: 'left', borderBottom: '2px solid #333' }}>
+                <th style={{ padding: '10px' }}>ZONA</th><th>AUTO</th><th>PESANTI</th><th>TOTALE</th>
               </tr>
             </thead>
             <tbody>
               {data.rois.map((roi) => {
-                const s = data.stats[roi.id] || {car:0, motorcycle:0, bus:0, truck:0, occupied: false};
-                const heavy = (s.bus || 0) + (s.truck || 0);
-                const total = s.car + s.motorcycle + heavy;
+                const s = data.stats[roi.id] || {car:0, motorcycle:0, bus:0, truck:0};
+                const total = s.car + s.motorcycle + s.bus + s.truck;
                 return (
-                  <tr key={roi.id} style={{ borderBottom: '1px solid #2a2a2a', background: s.occupied ? 'rgba(0, 229, 255, 0.1)' : 'transparent' }}>
-                    <td style={{ padding: '15px', fontWeight: '500' }}>{roi.label}</td>
+                  <tr key={roi.id} style={{ borderBottom: '1px solid #2a2a2a', background: s.occupied ? 'rgba(0,229,255,0.1)' : 'transparent' }}>
+                    <td style={{ padding: '10px' }}>{roi.label}</td>
                     <td style={{ textAlign: 'center' }}>{s.car}</td>
-                    <td style={{ textAlign: 'center', color: '#ffea00' }}>{s.motorcycle}</td>
-                    <td style={{ textAlign: 'center' }}>{heavy}</td>
-                    <td style={{ textAlign: 'center', fontWeight: 'bold', fontSize: '1.1em', color: '#00e5ff' }}>{total}</td>
+                    <td style={{ textAlign: 'center' }}>{(s.bus||0)+(s.truck||0)}</td>
+                    <td style={{ textAlign: 'center', color: '#00e5ff', fontWeight: 'bold' }}>{total}</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-          
-          <button onClick={resetAll} style={{ width: '100%', marginTop: '25px', padding: '12px', background: '#d32f2f', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
-            RESETTA TUTTE LE ZONE
-          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '20px' }}>
+            <button onClick={resetStatsOnly} style={{ padding: '12px', background: '#ff9100', color: 'black', border: 'none', fontWeight: 'bold', cursor: 'pointer' }}>AZZERA CONTEGGI</button>
+            <button onClick={deleteZones} style={{ padding: '12px', background: '#d32f2f', color: 'white', border: 'none', cursor: 'pointer' }}>ELIMINA ZONE E DATI</button>
+          </div>
         </div>
       </div>
     </div>
