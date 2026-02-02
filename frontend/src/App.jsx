@@ -14,8 +14,17 @@ const App = () => {
     frame_skip: 2 // Valore iniziale
   });
   
-  const W = 800;
-  const H = 450;
+  const [videoSize, setVideoSize] = useState({ W: 800, H: 450 });
+
+  const updateVideoSize = () => {
+    const sidebarWidth = 300; // corrisponde al pannello sinistro
+    const gap = 20; // gap tra colonne
+    const availableWidth = window.innerWidth - sidebarWidth - gap - 60; // margine extra
+    // assegniamo metà dello spazio disponibile al video e metà alla tabella
+    const videoWidth = Math.min(900, Math.max(480, availableWidth * 0.5));
+    const videoHeight = Math.round(videoWidth * 9 / 16);
+    setVideoSize({ W: videoWidth, H: videoHeight });
+  };
 
   const listaClassi = [
     { id: 0, label: "Persone" },
@@ -34,13 +43,17 @@ const App = () => {
     };
     fetchSettings();
     
+    // imposta dimensione video iniziale e si aggiorna al resize
+    updateVideoSize();
+    window.addEventListener('resize', updateVideoSize);
+
     const interval = setInterval(async () => {
       try {
         const res = await axios.get('http://localhost:8000/api/stats');
         setData(res.data);
       } catch (e) { console.error(e); }
     }, 1000);
-    return () => clearInterval(interval);
+    return () => { clearInterval(interval); window.removeEventListener('resize', updateVideoSize); };
   }, []);
 
   const inviaSettings = async (nuoviSettaggi) => {
@@ -137,74 +150,78 @@ const App = () => {
           <button onClick={() => { if(window.confirm("Eliminare tutte le zone?")) axios.post('http://localhost:8000/api/roi', {rois:[]}) }} style={{ width: '100%', padding: '12px', background: 'transparent', border: '1px solid #ff5252', borderRadius: '6px', color: '#ff5252', fontWeight: 'bold', cursor: 'pointer', marginTop: '10px' }}>CANCELLA ZONE</button>
         </div>
 
-        {/* VIDEO */}
-        <div style={{ flex: 1 }}>
-          <div style={{ position: 'relative', border: '2px solid #333', borderRadius: '12px', overflow: 'hidden', width: W, height: H, background: '#000' }}>
-            {/* RIMOSSO IL TIMESTAMP ?t=... PER EVITARE RE-FLASH CONTINUI */}
-            <img 
-              src="http://localhost:8000/api/video_feed" 
-              onClick={handleCanvasClick} 
-              style={{ width: W, height: H, cursor: 'crosshair' }} 
-            />
-            <svg style={{ position: 'absolute', top: 0, left: 0, width: W, height: H, pointerEvents: 'none' }}>
-              {points.map((p, i) => <circle key={i} cx={p.x * W} cy={p.y * H} r="6" fill="#00e5ff" stroke="white" strokeWidth="1" />)}
-              {points.length > 1 && <polyline points={points.map(p => `${p.x * W},${p.y * H}`).join(' ')} fill="none" stroke="#00e5ff" strokeWidth="3" />}
-            </svg>
+        {/* VIDEO + TABELLA affiancate */}
+        <div style={{ flex: 1, display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
+          {/* Video column */}
+          <div style={{ flex: 1 }}>
+            <div style={{ position: 'relative', border: '2px solid #333', borderRadius: '12px', overflow: 'hidden', width: videoSize.W, height: videoSize.H, background: '#000' }}>
+              <img
+                src="http://localhost:8000/api/video_feed"
+                onClick={handleCanvasClick}
+                style={{ width: videoSize.W, height: videoSize.H, cursor: 'crosshair' }}
+              />
+              <svg style={{ position: 'absolute', top: 0, left: 0, width: videoSize.W, height: videoSize.H, pointerEvents: 'none' }}>
+                {points.map((p, i) => <circle key={i} cx={p.x * videoSize.W} cy={p.y * videoSize.H} r="6" fill="#00e5ff" stroke="white" strokeWidth="1" />)}
+                {points.length > 1 && <polyline points={points.map(p => `${p.x * videoSize.W},${p.y * videoSize.H}`).join(' ')} fill="none" stroke="#00e5ff" strokeWidth="3" />}
+              </svg>
+            </div>
+
+            <div style={{ marginTop: '15px', display: 'flex', gap: '10px' }}>
+              <input placeholder="Nome zona..." value={roiName} onChange={e => setRoiName(e.target.value)} style={{ padding: '12px', flex: 1, borderRadius: '8px', border: 'none', background: '#1e1e1e', color: 'white' }} />
+              <button onClick={aggiungiZona} style={{ padding: '12px 25px', background: '#00e5ff', color: 'black', fontWeight: 'bold', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>AGGIUNGI ZONA</button>
+            </div>
           </div>
 
-          <div style={{ marginTop: '15px', display: 'flex', gap: '10px' }}>
-            <input placeholder="Nome zona..." value={roiName} onChange={e => setRoiName(e.target.value)} style={{ padding: '12px', flex: 1, borderRadius: '8px', border: 'none', background: '#1e1e1e', color: 'white' }} />
-            <button onClick={aggiungiZona} style={{ padding: '12px 25px', background: '#00e5ff', color: 'black', fontWeight: 'bold', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>AGGIUNGI ZONA</button>
+          {/* Table column */}
+          <div style={{ width: '48%', maxWidth: 720, overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: '0 5px', minWidth: '520px' }}>
+              <thead>
+                <tr style={{ textAlign: 'left', color: '#00e5ff' }}>
+                  <th style={{ padding: '15px' }}>Zona</th>
+                  <th style={{ textAlign: 'center' }}>Persone</th>
+                  <th style={{ textAlign: 'center' }}>Auto</th>
+                  <th style={{ textAlign: 'center' }}>Moto</th>
+                  <th style={{ textAlign: 'center' }}>Bus</th>
+                  <th style={{ textAlign: 'center' }}>Camion</th>
+                  <th style={{ textAlign: 'center' }}>Filtri per Zona</th>
+                  <th style={{ textAlign: 'right', paddingRight: '15px' }}>Azioni</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.rois.map(roi => {
+                  const s = data.stats[roi.id] || {person:0, car:0, motorcycle:0, bus:0, truck:0, occupied: false};
+                  const attivi = roi.allowed_classes || [0, 2, 3, 5, 7];
+                  return (
+                    <tr key={roi.id} style={{ background: s.occupied ? 'rgba(0,229,255,0.1)' : '#1e1e1e' }}>
+                      <td style={{ padding: '15px', borderRadius: '10px 0 0 10px', fontWeight: 'bold' }}>{roi.label}</td>
+                      <td style={{ textAlign: 'center' }}>{s.person}</td>
+                      <td style={{ textAlign: 'center' }}>{s.car}</td>
+                      <td style={{ textAlign: 'center' }}>{s.motorcycle}</td>
+                      <td style={{ textAlign: 'center' }}>{s.bus}</td>
+                      <td style={{ textAlign: 'center' }}>{s.truck}</td>
+                      <td style={{ textAlign: 'center' }}>
+                        <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
+                          {listaClassi.map(c => (
+                            <button key={c.id} onClick={() => toggleClasseZona(roi.id, c.id)}
+                              style={{ padding: '4px 7px', fontSize: '10px', borderRadius: '4px', border: 'none', cursor: 'pointer',
+                                       background: attivi.includes(c.id) ? '#00e5ff' : '#333',
+                                       color: attivi.includes(c.id) ? 'black' : '#777' }}>
+                              {c.label.charAt(0)}
+                            </button>
+                          ))}
+                        </div>
+                      </td>
+                      <td style={{ textAlign: 'right', paddingRight: '15px', borderRadius: '0 10px 10px 0' }}>
+                        <button onClick={() => { if(window.confirm("Eliminare?")) axios.delete(`http://localhost:8000/api/roi/${roi.id}`) }} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>🗑️</button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
-
-      {/* TABELLA */}
-      <table style={{ width: '100%', marginTop: '30px', borderCollapse: 'separate', borderSpacing: '0 5px' }}>
-        <thead>
-          <tr style={{ textAlign: 'left', color: '#00e5ff' }}>
-            <th style={{ padding: '15px' }}>Zona</th>
-            <th style={{ textAlign: 'center' }}>Persone</th>
-            <th style={{ textAlign: 'center' }}>Auto</th>
-            <th style={{ textAlign: 'center' }}>Moto</th>
-            <th style={{ textAlign: 'center' }}>Bus</th>
-            <th style={{ textAlign: 'center' }}>Camion</th>
-            <th style={{ textAlign: 'center' }}>Filtri per Zona</th>
-            <th style={{ textAlign: 'right', paddingRight: '15px' }}>Azioni</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.rois.map(roi => {
-            const s = data.stats[roi.id] || {person:0, car:0, motorcycle:0, bus:0, truck:0, occupied: false};
-            const attivi = roi.allowed_classes || [0, 2, 3, 5, 7];
-            return (
-              <tr key={roi.id} style={{ background: s.occupied ? 'rgba(0,229,255,0.1)' : '#1e1e1e' }}>
-                <td style={{ padding: '15px', borderRadius: '10px 0 0 10px', fontWeight: 'bold' }}>{roi.label}</td>
-                <td style={{ textAlign: 'center' }}>{s.person}</td>
-                <td style={{ textAlign: 'center' }}>{s.car}</td>
-                <td style={{ textAlign: 'center' }}>{s.motorcycle}</td>
-                <td style={{ textAlign: 'center' }}>{s.bus}</td>
-                <td style={{ textAlign: 'center' }}>{s.truck}</td>
-                <td style={{ textAlign: 'center' }}>
-                  <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
-                    {listaClassi.map(c => (
-                      <button key={c.id} onClick={() => toggleClasseZona(roi.id, c.id)}
-                        style={{ padding: '4px 7px', fontSize: '10px', borderRadius: '4px', border: 'none', cursor: 'pointer',
-                                 background: attivi.includes(c.id) ? '#00e5ff' : '#333',
-                                 color: attivi.includes(c.id) ? 'black' : '#777' }}>
-                        {c.label.charAt(0)}
-                      </button>
-                    ))}
-                  </div>
-                </td>
-                <td style={{ textAlign: 'right', paddingRight: '15px', borderRadius: '0 10px 10px 0' }}>
-                  <button onClick={() => { if(window.confirm("Eliminare?")) axios.delete(`http://localhost:8000/api/roi/${roi.id}`) }} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>🗑️</button>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
     </div>
   );
 };
