@@ -13,6 +13,7 @@ from shapely.geometry import Polygon, box
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+# Configurazione Percorsi
 MODEL_PATH = 'yolov8n.pt' 
 VIDEO_PATH = "data/video.mp4" 
 CONFIG_PATH = "config/rois.json"
@@ -20,6 +21,7 @@ CONFIG_PATH = "config/rois.json"
 os.makedirs("config", exist_ok=True)
 model = YOLO(MODEL_PATH)
 
+# Stato
 stats = {}
 counted_ids_per_roi = {}
 current_rois = []
@@ -27,8 +29,15 @@ latest_processed_frame = None
 class_map = {0: "person", 2: "car", 3: "motorcycle", 5: "bus", 7: "truck"}
 data_lock = threading.Lock()
 
-# Aggiunto "show_boxes" alle impostazioni
-settings = {"conf": 0.25, "imgsz": 640, "clahe_limit": 2.0, "classes": [0, 2, 3, 5, 7], "show_boxes": True}
+# Impostazioni Globali (Incluso Frame Skip e Box)
+settings = {
+    "conf": 0.25, 
+    "imgsz": 640, 
+    "clahe_limit": 2.0, 
+    "classes": [0, 2, 3, 5, 7], 
+    "show_boxes": True,
+    "frame_skip": 2  # Elabora 1 frame ogni X
+}
 
 def sync_config():
     global stats, counted_ids_per_roi, current_rois
@@ -51,6 +60,7 @@ sync_config()
 def processing_worker():
     global latest_processed_frame
     cap = cv2.VideoCapture(VIDEO_PATH)
+    f_counter = 0 
     
     while True:
         success, frame = cap.read()
@@ -58,13 +68,21 @@ def processing_worker():
             cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
             continue
 
+        f_counter += 1
+        # Logica Salto Frame Dinamica
+        if f_counter % settings.get("frame_skip", 1) != 0:
+            continue
+
         h, w = frame.shape[:2]
+        
+        # Miglioramento immagine
         clahe = cv2.createCLAHE(clipLimit=settings["clahe_limit"], tileGridSize=(8,8))
         lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
         l, a, b_chan = cv2.split(lab)
         cl = clahe.apply(l)
         enhanced = cv2.cvtColor(cv2.merge((cl, a, b_chan)), cv2.COLOR_LAB2BGR)
 
+        # Inferenza
         results = model.track(enhanced, persist=True, verbose=False, conf=settings["conf"], imgsz=settings["imgsz"], classes=settings["classes"])
         annotated_frame = frame.copy()
         
@@ -81,7 +99,6 @@ def processing_worker():
                     cls_name = class_map.get(cls_id)
                     if not cls_name: continue
                     
-                    # DISEGNO BOX SE ATTIVO (immutato)
                     if settings["show_boxes"]:
                         cv2.rectangle(annotated_frame, (int(b[0]), int(b[1])), (int(b[2]), int(b[3])), (255, 255, 0), 2)
                         cv2.putText(annotated_frame, f"ID:{obj_id} {cls_name}", (int(b[0]), int(b[1])-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
@@ -93,8 +110,6 @@ def processing_worker():
                         poly = Polygon([(p['x']*w, p['y']*h) for p in roi['points']])
                         
                         if poly.intersects(veh_box):
-                            # MODIFICA QUI: La zona si considera "occupata" (verde) 
-                            # SOLO SE l'oggetto è tra quelli permessi dai filtri della zona
                             if cls_id in allowed:
                                 stats[rid]["occupied"] = True
                                 if int(obj_id) not in counted_ids_per_roi[rid]:

@@ -10,7 +10,8 @@ const App = () => {
     clahe_limit: 2.0, 
     imgsz: 640, 
     classes: [0, 2, 3, 5, 7],
-    show_boxes: true
+    show_boxes: true,
+    frame_skip: 2 // Valore iniziale
   });
   
   const W = 800;
@@ -101,7 +102,13 @@ const App = () => {
             <input type="range" min="0" max="5" step="0.1" value={settings.clahe_limit} style={{width:'100%'}} onChange={e => inviaSettings({clahe_limit: parseFloat(e.target.value)})}/>
           </div>
 
-          {/* NUOVO: TOGGLE BOX RILEVAMENTO */}
+          {/* AGGIUNTO: SLIDER FRAME SKIP */}
+          <div style={{marginBottom: '15px'}}>
+            <label style={{display:'block', fontSize:'14px'}}>Salto Frame (Fluidità): <b>{settings.frame_skip}</b></label>
+            <input type="range" min="1" max="10" step="1" value={settings.frame_skip || 1} style={{width:'100%'}} onChange={e => inviaSettings({frame_skip: parseInt(e.target.value)})}/>
+            <small style={{color: '#888', fontSize: '11px'}}>Aumenta se il video rallenta (salta frame CPU)</small>
+          </div>
+
           <div style={{marginBottom: '20px', display: 'flex', alignItems: 'center', background: '#2d2d2d', padding: '10px', borderRadius: '8px'}}>
             <input type="checkbox" id="showBoxes" checked={settings.show_boxes} onChange={e => inviaSettings({show_boxes: e.target.checked})} style={{marginRight: '10px', cursor:'pointer'}} />
             <label htmlFor="showBoxes" style={{fontSize: '14px', cursor:'pointer'}}>Mostra Box Rilevamento</label>
@@ -133,7 +140,12 @@ const App = () => {
         {/* VIDEO */}
         <div style={{ flex: 1 }}>
           <div style={{ position: 'relative', border: '2px solid #333', borderRadius: '12px', overflow: 'hidden', width: W, height: H, background: '#000' }}>
-            <img src={`http://localhost:8000/api/video_feed?t=${Date.now()}`} onClick={handleCanvasClick} style={{ width: W, height: H, cursor: 'crosshair' }} />
+            {/* RIMOSSO IL TIMESTAMP ?t=... PER EVITARE RE-FLASH CONTINUI */}
+            <img 
+              src="http://localhost:8000/api/video_feed" 
+              onClick={handleCanvasClick} 
+              style={{ width: W, height: H, cursor: 'crosshair' }} 
+            />
             <svg style={{ position: 'absolute', top: 0, left: 0, width: W, height: H, pointerEvents: 'none' }}>
               {points.map((p, i) => <circle key={i} cx={p.x * W} cy={p.y * H} r="6" fill="#00e5ff" stroke="white" strokeWidth="1" />)}
               {points.length > 1 && <polyline points={points.map(p => `${p.x * W},${p.y * H}`).join(' ')} fill="none" stroke="#00e5ff" strokeWidth="3" />}

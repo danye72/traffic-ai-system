@@ -15,3 +15,4 @@ build/
 
 # Database locale e config temporanee
 config/rois.json
+config/stats.json
