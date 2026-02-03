@@ -14,5 +14,5 @@ dist/
 build/
 
 # Database locale e config temporanee
-config/rois.json
+rois.json
 config/stats.json
