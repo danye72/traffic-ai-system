@@ -14,12 +14,34 @@ app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # Configurazione Percorsi
-MODEL_PATH = 'yolov8n.pt' 
-VIDEO_PATH = "data/video.mp4" 
+MODEL_PATH = 'yolov8n.pt'
+VIDEO_PATH = "data/video.mp4"
 CONFIG_PATH = "config/rois.json"
 
 os.makedirs("config", exist_ok=True)
-model = YOLO(MODEL_PATH)
+
+# Caricamento modello tramite helper per permettere switch a runtime
+model_lock = threading.Lock()
+model = None
+
+def load_model(path: str):
+    global model, MODEL_PATH
+    with model_lock:
+        model = YOLO(path)
+        MODEL_PATH = path
+    return model
+
+# Carica modello iniziale (puoi scegliere 'yolov8n.pt' o 'yolov8s.pt')
+load_model(MODEL_PATH)
+
+# Modelli predefiniti (inclusi nomi che Ultralyics può scaricare automaticamente)
+DEFAULT_MODELS = [
+    'yolov8n.pt',
+    'yolov8s.pt',
+    'yolov8m.pt',
+    'yolov8l.pt',
+    'yolov8x.pt'
+]
 
 # Stato
 stats = {}
@@ -34,6 +56,7 @@ settings = {
     "conf": 0.25, 
     "imgsz": 640, 
     "clahe_limit": 2.0, 
+    "model": MODEL_PATH,
     "classes": [0, 2, 3, 5, 7], 
     "show_boxes": True,
     "frame_skip": 2  # Elabora 1 frame ogni X
@@ -146,9 +169,49 @@ async def get_stats():
 @app.get("/api/settings")
 async def get_settings(): return settings
 
+
+@app.get("/api/models")
+async def list_models():
+    base = os.path.dirname(__file__)
+    local = []
+    try:
+        local = [f for f in os.listdir(base) if f.endswith('.pt')]
+    except Exception:
+        local = []
+    # Unione mantenendo ordine: DEFAULT_MODELS poi file locali aggiuntivi
+    models = []
+    for m in DEFAULT_MODELS:
+        if m not in models:
+            models.append(m)
+    for m in local:
+        if m not in models:
+            models.append(m)
+    return {"models": models}
+
+
+@app.get("/api/models")
+async def list_models():
+    try:
+        base = os.path.dirname(__file__)
+        models = [f for f in os.listdir(base) if f.endswith('.pt')]
+    except Exception:
+        models = []
+    return {"models": models}
+
 @app.post("/api/settings")
 async def update_settings(new_settings: dict):
     global settings
+    # Se è richiesto un cambio modello, proviamo a caricarlo
+    model_requested = new_settings.get('model')
+    if model_requested and model_requested != MODEL_PATH:
+        model_path_local = os.path.join(os.path.dirname(__file__), model_requested) if not os.path.isabs(model_requested) else model_requested
+        # Prova a caricare il modello; se fallisce ritorna errore
+        try:
+            load_model(model_path_local)
+            new_settings['model'] = MODEL_PATH
+        except Exception as e:
+            return {"error": f"Impossibile caricare modello: {e}"}
+
     settings.update(new_settings)
     return settings
 
