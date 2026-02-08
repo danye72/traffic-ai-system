@@ -4,3 +4,5 @@ opencv-python-headless
 ultralytics
 shapely
 numpy
+onnx
+onnxruntime

@@ -19,6 +19,10 @@ const App = () => {
   const [selectedModel, setSelectedModel] = useState("");
   const [modelStatus, setModelStatus] = useState("");
   const [editingRoiId, setEditingRoiId] = useState(null);
+  const [selectedSegmentConfig, setSelectedSegmentConfig] = useState(null); // ROI ID per configurare segmenti
+  const [selectedDirection, setSelectedDirection] = useState(null); // Direzione selezionata
+  const [directionNames, setDirectionNames] = useState({}); // Traccia i nomi delle direzioni in editing
+  const [expandedRoi, setExpandedRoi] = useState(null); // ROI ID espanso per visualizzare i conteggi per direzione
   const draggingRef = React.useRef(null);
   const editingRef = React.useRef(false);
 
@@ -172,10 +176,68 @@ const App = () => {
 
   const aggiungiZona = async () => {
     if (points.length < 3 || !roiName) return alert("Disegna un'area e dai un nome!");
-    const nuovaRoi = { id: Date.now(), label: roiName, points, allowed_classes: settings.classes };
+    const nuovaRoi = { id: Date.now(), label: roiName, points, allowed_classes: settings.classes, segments: 4, directions: [] };
     const aggiornate = [...data.rois, nuovaRoi];
     await axios.post('http://localhost:8000/api/roi', { rois: aggiornate });
     setPoints([]); setRoiName("");
+  };
+
+  // Funzione per calcolare i segmenti del ROI
+  const getSegmentPoints = (roi) => {
+    if (!roi.points || roi.points.length < 2) return [];
+    const segmentCount = roi.segments || 4;
+    const totalPoints = roi.points.length;
+    const pointsPerSegment = Math.ceil(totalPoints / segmentCount);
+    const segments = [];
+    
+    for (let i = 0; i < segmentCount; i++) {
+      const startIdx = (i * pointsPerSegment) % totalPoints;
+      const endIdx = ((i + 1) * pointsPerSegment) % totalPoints;
+      segments.push({ id: i + 1, startIdx, endIdx });
+    }
+    return segments;
+  };
+
+  // Funzione per aggiungere/rimuovere direzione
+  const toggleDirection = async (roiId, fromSegment, toSegment) => {
+    const roisAggiornate = data.rois.map(roi => {
+      if (roi.id === roiId) {
+        const directions = roi.directions || [];
+        const existing = directions.findIndex(d => d.from === fromSegment && d.to === toSegment);
+        
+        if (existing >= 0) {
+          directions.splice(existing, 1);
+        } else {
+          // Aggiungi la nuova direzione con un nome di default
+          const dirName = `${fromSegment}→${toSegment}`;
+          directions.push({ from: fromSegment, to: toSegment, name: dirName });
+          
+          // Inizializza il nome in directionNames
+          const key = `${roiId}_${fromSegment}_${toSegment}`;
+          setDirectionNames(prev => ({ ...prev, [key]: dirName }));
+        }
+        return { ...roi, directions };
+      }
+      return roi;
+    });
+    setData({ ...data, rois: roisAggiornate });
+    await axios.post('http://localhost:8000/api/roi', { rois: roisAggiornate });
+  };
+
+  const updateDirectionName = async (roiId, fromSegment, toSegment, newName) => {
+    const roisAggiornate = data.rois.map(roi => {
+      if (roi.id === roiId) {
+        const directions = roi.directions || [];
+        const dir = directions.find(d => d.from === fromSegment && d.to === toSegment);
+        if (dir) {
+          dir.name = newName;
+        }
+        return { ...roi, directions };
+      }
+      return roi;
+    });
+    setData({ ...data, rois: roisAggiornate });
+    await axios.post('http://localhost:8000/api/roi', { rois: roisAggiornate });
   };
 
   return (
@@ -257,9 +319,28 @@ const App = () => {
                 {/* Render ROI polygons and draggable vertices */}
                 {(data.rois || []).map(roi => {
                   const pts = roi.points.map(p => `${p.x * videoSize.W},${p.y * videoSize.H}`).join(' ');
+                  const segments = getSegmentPoints(roi);
+                  
                   return (
                     <g key={roi.id}>
                       <polygon points={pts} fill={ (data.stats[roi.id] && data.stats[roi.id].occupied) ? 'rgba(0,255,0,0.06)' : 'rgba(255,0,0,0.04)'} stroke={ (data.stats[roi.id] && data.stats[roi.id].occupied) ? '#00ff00' : '#ff0000' } strokeWidth={3} />
+                      
+                      {/* Render segment numbers */}
+                      {segments.map((seg) => {
+                        const startP = roi.points[seg.startIdx];
+                        const endP = roi.points[seg.endIdx];
+                        const midX = ((startP.x + endP.x) / 2) * videoSize.W;
+                        const midY = ((startP.y + endP.y) / 2) * videoSize.H;
+                        return (
+                          <g key={`seg-${seg.id}`}>
+                            <circle cx={midX} cy={midY} r="12" fill="#ffaa00" opacity="0.8" />
+                            <text x={midX} y={midY + 4} textAnchor="middle" fontSize="11" fontWeight="bold" fill="black">
+                              {seg.id}
+                            </text>
+                          </g>
+                        );
+                      })}
+                      
                       {roi.points.map((p, idx) => (
                         <circle key={idx} cx={p.x * videoSize.W} cy={p.y * videoSize.H} r={6} fill={editingRoiId === roi.id ? '#ffaa00' : '#00e5ff'} stroke="white" strokeWidth="1"
                           onMouseDown={(e) => startVertexDrag(roi.id, idx, e)} />
@@ -288,37 +369,87 @@ const App = () => {
                   <th style={{ textAlign: 'center' }}>Bus</th>
                   <th style={{ textAlign: 'center' }}>Camion</th>
                   <th style={{ textAlign: 'center' }}>Filtri per Zona</th>
+                  <th style={{ textAlign: 'center' }}>Direzioni</th>
                   <th style={{ textAlign: 'right', paddingRight: '15px' }}>Azioni</th>
                 </tr>
               </thead>
               <tbody>
                 {data.rois.map(roi => {
-                  const s = data.stats[roi.id] || {person:0, car:0, motorcycle:0, bus:0, truck:0, occupied: false};
+                  const roiIdStr = String(roi.id);  // Converti a string per abbinare il backend
+                  const statsData = data.stats[roiIdStr];
+                  const s = statsData?.total || {person:0, car:0, motorcycle:0, bus:0, truck:0, occupied: false};
+                  const directions = statsData?.directions || {};
                   const attivi = roi.allowed_classes || [0, 2, 3, 5, 7];
+                  const configuredDirections = roi.directions || [];
+                  const isExpanded = expandedRoi === roi.id;
+                  
                   return (
-                    <tr key={roi.id} style={{ background: s.occupied ? 'rgba(0,229,255,0.1)' : '#1e1e1e' }}>
-                      <td style={{ padding: '15px', borderRadius: '10px 0 0 10px', fontWeight: 'bold' }}>{roi.label}</td>
-                      <td style={{ textAlign: 'center' }}>{s.person}</td>
-                      <td style={{ textAlign: 'center' }}>{s.car}</td>
-                      <td style={{ textAlign: 'center' }}>{s.motorcycle}</td>
-                      <td style={{ textAlign: 'center' }}>{s.bus}</td>
-                      <td style={{ textAlign: 'center' }}>{s.truck}</td>
-                      <td style={{ textAlign: 'center' }}>
-                        <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
-                          {listaClassi.map(c => (
-                            <button key={c.id} onClick={() => toggleClasseZona(roi.id, c.id)}
-                              style={{ padding: '4px 7px', fontSize: '10px', borderRadius: '4px', border: 'none', cursor: 'pointer',
-                                       background: attivi.includes(c.id) ? '#00e5ff' : '#333',
-                                       color: attivi.includes(c.id) ? 'black' : '#777' }}>
-                              {c.label.charAt(0)}
-                            </button>
-                          ))}
-                        </div>
-                      </td>
-                      <td style={{ textAlign: 'right', paddingRight: '15px', borderRadius: '0 10px 10px 0' }}>
-                        <button onClick={() => { if(window.confirm("Eliminare?")) axios.delete(`http://localhost:8000/api/roi/${roi.id}`) }} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>🗑️</button>
-                      </td>
-                    </tr>
+                    <React.Fragment key={roi.id}>
+                      <tr style={{ background: s.occupied ? 'rgba(0,229,255,0.1)' : '#1e1e1e' }}>
+                        <td style={{ padding: '15px', borderRadius: isExpanded ? '10px 0 0 0' : '10px 0 0 10px', fontWeight: 'bold', cursor: 'pointer' }} onClick={() => setExpandedRoi(isExpanded ? null : roi.id)}>
+                          {roi.label} {isExpanded ? '▼' : '▶'}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>{s.person}</td>
+                        <td style={{ textAlign: 'center' }}>{s.car}</td>
+                        <td style={{ textAlign: 'center' }}>{s.motorcycle}</td>
+                        <td style={{ textAlign: 'center' }}>{s.bus}</td>
+                        <td style={{ textAlign: 'center' }}>{s.truck}</td>
+                        <td style={{ textAlign: 'center' }}>
+                          <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
+                            {listaClassi.map(c => (
+                              <button key={c.id} onClick={() => toggleClasseZona(roi.id, c.id)}
+                                style={{ padding: '4px 7px', fontSize: '10px', borderRadius: '4px', border: 'none', cursor: 'pointer',
+                                         background: attivi.includes(c.id) ? '#00e5ff' : '#333',
+                                         color: attivi.includes(c.id) ? 'black' : '#777' }}>
+                                {c.label.charAt(0)}
+                              </button>
+                            ))}
+                          </div>
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <button onClick={() => setSelectedSegmentConfig(selectedSegmentConfig === roi.id ? null : roi.id)}
+                            style={{ padding: '6px 10px', fontSize: '11px', background: selectedSegmentConfig === roi.id ? '#00e5ff' : '#444', 
+                                     color: selectedSegmentConfig === roi.id ? 'black' : 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+                            Direzioni
+                          </button>
+                          {configuredDirections.length > 0 && (
+                            <div style={{ fontSize: '10px', color: '#00e5ff', marginTop: '4px' }}>
+                              {configuredDirections.length} direzioni
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'right', paddingRight: '15px', borderRadius: isExpanded ? '0 10px 0 0' : '0 10px 10px 0' }}>
+                          <button onClick={() => { if(window.confirm("Eliminare?")) axios.delete(`http://localhost:8000/api/roi/${roi.id}`) }} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>🗑️</button>
+                        </td>
+                      </tr>
+                      
+                      {/* Riga espansa con conteggi per direzione */}
+                      {isExpanded && Object.keys(directions).length > 0 && (
+                        <tr style={{ background: '#0a0a0a', borderBottom: '1px solid #333' }}>
+                          <td colSpan="9" style={{ padding: '15px' }}>
+                            <div style={{ marginLeft: '20px' }}>
+                              <h5 style={{ color: '#00e5ff', marginTop: 0, fontSize: '13px' }}>Conteggi per Direzione:</h5>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px' }}>
+                                {Object.entries(directions).map(([dirKey, dirStats]) => (
+                                  <div key={dirKey} style={{ background: '#1e1e1e', padding: '10px', borderRadius: '6px', border: '1px solid #333' }}>
+                                    <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#00e5ff', marginBottom: '6px' }}>
+                                      {dirStats.from}→{dirStats.to}: {dirStats.name}
+                                    </div>
+                                    <div style={{ fontSize: '11px', color: '#aaa' }}>
+                                      <div>P: {dirStats.person}</div>
+                                      <div>A: {dirStats.car}</div>
+                                      <div>M: {dirStats.motorcycle}</div>
+                                      <div>B: {dirStats.bus}</div>
+                                      <div>C: {dirStats.truck}</div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>
@@ -326,6 +457,82 @@ const App = () => {
           </div>
         </div>
       </div>
+
+      {/* Modal Configurazione Direzioni */}
+      {selectedSegmentConfig && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#1e1e1e', padding: '30px', borderRadius: '12px', maxWidth: '600px', border: '2px solid #00e5ff', maxHeight: '80vh', overflowY: 'auto' }}>
+            <h3 style={{ color: '#00e5ff', marginTop: 0 }}>Configura Direzioni di Conteggio</h3>
+            <p style={{ color: '#aaa', fontSize: '13px' }}>Seleziona le direzioni da conteggiare (segmento IN → segmento OUT) e dai loro un nome</p>
+            
+            {data.rois.filter(r => r.id === selectedSegmentConfig).map(roi => {
+              const segmentCount = roi.segments || 4;
+              const directions = roi.directions || [];
+              const segments = [];
+              for (let i = 1; i <= segmentCount; i++) segments.push(i);
+              
+              return (
+                <div key={roi.id}>
+                  <div style={{ marginBottom: '15px' }}>
+                    <strong style={{ color: '#fff' }}>{roi.label}</strong>
+                    <p style={{ color: '#888', fontSize: '12px' }}>Segmenti: {segmentCount}</p>
+                  </div>
+                  
+                  {/* Griglia pulsanti di selezione */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginBottom: '20px', maxHeight: '250px', overflowY: 'auto', background: '#0a0a0a', padding: '15px', borderRadius: '8px' }}>
+                    {segments.map(from => 
+                      segments.map(to => {
+                        if (from === to) return null;
+                        const isActive = directions.some(d => d.from === from && d.to === to);
+                        return (
+                          <button key={`${from}-${to}`} onClick={() => toggleDirection(roi.id, from, to)}
+                            style={{ padding: '10px', fontSize: '12px', fontWeight: 'bold', borderRadius: '6px', border: '2px solid #444',
+                                     background: isActive ? '#00e5ff' : '#222', color: isActive ? 'black' : '#888',
+                                     cursor: 'pointer', transition: 'all 0.2s' }}>
+                            {from}→{to}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Sezione per i nomi delle direzioni attive */}
+                  {directions.length > 0 && (
+                    <div style={{ background: '#252525', padding: '15px', borderRadius: '8px', marginBottom: '20px' }}>
+                      <h4 style={{ color: '#00e5ff', marginTop: 0, fontSize: '14px' }}>Nomi Direzioni</h4>
+                      {directions.map((dir, idx) => (
+                        <div key={`${dir.from}-${dir.to}`} style={{ marginBottom: '12px' }}>
+                          <label style={{ display: 'block', fontSize: '12px', color: '#aaa', marginBottom: '4px' }}>
+                            {dir.from} → {dir.to}
+                          </label>
+                          <input 
+                            type="text"
+                            value={dir.name || `${dir.from}→${dir.to}`}
+                            onChange={(e) => updateDirectionName(roi.id, dir.from, dir.to, e.target.value)}
+                            placeholder={`Ad es: Nord→Sud`}
+                            style={{ 
+                              width: '100%', 
+                              padding: '8px', 
+                              background: '#1e1e1e', 
+                              color: '#fff', 
+                              border: '1px solid #444', 
+                              borderRadius: '4px',
+                              boxSizing: 'border-box',
+                              fontSize: '12px'
+                            }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            
+            <button onClick={() => setSelectedSegmentConfig(null)} style={{ width: '100%', padding: '12px', background: '#444', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Chiudi</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

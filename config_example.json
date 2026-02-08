@@ -1,0 +1,20 @@
+{
+  "rois": [
+    {
+      "id": 1770129600277,
+      "label": "Intersezione Principale",
+      "points": [
+        {"x": 0.2, "y": 0.3},
+        {"x": 0.8, "y": 0.3},
+        {"x": 0.8, "y": 0.7},
+        {"x": 0.2, "y": 0.7}
+      ],
+      "segments": 4,
+      "directions": [
+        {"from": 1, "to": 3},
+        {"from": 2, "to": 4}
+      ],
+      "allowed_classes": [2, 5, 7]
+    }
+  ]
+}
